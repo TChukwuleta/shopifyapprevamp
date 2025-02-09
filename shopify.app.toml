@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "cc0fca15470883d19567ed9506d5ec3d"
-application_url = "https://ho-sufficient-fat-transmitted.trycloudflare.com"
+application_url = "https://shopifyapprevamp.vercel.app/"
 embedded = true
 name = "bitssaco"
 handle = "bitssaco"
@@ -9,7 +9,7 @@ handle = "bitssaco"
 [build]
 include_config_on_deploy = true
 dev_store_url = "quickstart-4c9539b2.myshopify.com"
-automatically_update_urls_on_dev = true
+automatically_update_urls_on_dev = false
 
 [webhooks]
 api_version = "2025-01"
@@ -28,9 +28,9 @@ scopes = "write_products"
 
 [auth]
 redirect_urls = [
-  "https://ho-sufficient-fat-transmitted.trycloudflare.com/auth/callback",
-  "https://ho-sufficient-fat-transmitted.trycloudflare.com/auth/shopify/callback",
-  "https://ho-sufficient-fat-transmitted.trycloudflare.com/api/auth/callback"
+  "https://shopifyapprevamp.vercel.app/auth/callback",
+  "https://shopifyapprevamp.vercel.app/auth/shopify/callback",
+  "https://shopifyapprevamp.vercel.app/api/auth/callback"
 ]
 
 [pos]
