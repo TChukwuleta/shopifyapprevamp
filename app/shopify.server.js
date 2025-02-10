@@ -7,7 +7,6 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
-console.log(process.env.SHOPIFY_APP_URL);
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -15,7 +14,7 @@ const shopify = shopifyApp({
   apiVersion: ApiVersion.October24,
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
-  authPathPrefix: "/auth",
+  authPathPrefix: "/shopifyapp/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
   future: {
@@ -26,6 +25,13 @@ const shopify = shopifyApp({
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
 });
+
+export const testEnv = () => {
+  console.log("SHOPIFY_APP_URL:", process.env.SHOPIFY_APP_URL);
+};
+
+testEnv();
+
 
 export default shopify;
 export const apiVersion = ApiVersion.October24;
