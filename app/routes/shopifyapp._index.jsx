@@ -1,6 +1,5 @@
 import { redirect } from '@remix-run/node';
-import { authenticate, login } from "../shopify.server";
-import { Form, useLoaderData } from "@remix-run/react";
+import { login } from "../shopify.server";
 
 
 export const loader = async ({ request }) => {
@@ -9,16 +8,11 @@ export const loader = async ({ request }) => {
   if (url.searchParams.get("shop")) {
     throw redirect(`/shopifyapp/app?${url.searchParams.toString()}`);
   }
-
-  return { showForm: Boolean(login) };
 };
 
 
 // app/routes/shopifyapp._index.tsx
 export default function ShopifyApp() {
-  
-  const { showForm } = useLoaderData();
-
     return (
       <div>
         <h1>Welcome to the Shopify App</h1>
