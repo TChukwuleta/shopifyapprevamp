@@ -9,7 +9,10 @@
 //   }
 
 import { redirect } from '@remix-run/node';
+import { authenticate } from "../shopify.server";
 
-export const loader = () => {
+export const loader = async ({ request }) => {
+  console.log(request);
+  await authenticate.admin(request);
   return redirect('/shopifyapp/app');
 };
