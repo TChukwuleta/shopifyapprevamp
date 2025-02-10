@@ -8,8 +8,6 @@ export const loader = async ({ request }) => {
   }
 };
 
-
-// app/routes/shopifyapp._index.tsx
 export default function ShopifyApp() {
     return (
       <div>
