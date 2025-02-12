@@ -34,3 +34,15 @@ model Session {
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
 }
+
+model BTCPayServerStore {
+  id            Int     @id @default(autoincrement())
+  btcpayUrl     String
+  shopName      String?
+  shop          String  @unique
+  btcpayStoreId String
+  shopId        String?
+  shopOwner     String?
+  currency      String?
+  country       String?
+}

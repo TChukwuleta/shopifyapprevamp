@@ -1,328 +1,162 @@
-import { useEffect } from "react";
-import { useFetcher } from "@remix-run/react";
-import {
-  Page,
-  Layout,
-  Text,
-  Card,
-  Button,
-  BlockStack,
-  Box,
-  List,
-  Link,
-  InlineStack,
-} from "@shopify/polaris";
-import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import db from "../db.server";
+import { json } from "@remix-run/node";
+import { useEffect, useState } from "react";
 import { authenticate } from "../shopify.server";
+import { useFetcher, useLoaderData } from "@remix-run/react";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import { Page, Text, Card, Button, BlockStack, InlineGrid, TextField, Box } from "@shopify/polaris";
 
-export const loader = async ({ request }) => {
+export async function loader({ request }) {
   await authenticate.admin(request);
-
-  return null;
-};
+  const url = new URL(request.url);
+  const shop = url.searchParams.get('shop');
+  const btcpayServerRecord = await db.bTCPayServerStore.findFirst({
+      where: { shop }
+  });
+  return { btcpayUrl: btcpayServerRecord?.btcpayUrl, btcpayStoreId: btcpayServerRecord?.btcpayStoreId };
+}
 
 export const action = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
-  const variantId = product.variants.edges[0].node.id;
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyRemixTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-  const variantResponseJson = await variantResponse.json();
+  await authenticate.admin(request);
+  try {
+    const url = new URL(request.url);
+    const shop = url.searchParams.get('shop');
+    const shopId = shop.split('.myshopify.com')[0];
+    const formData = Object.fromEntries(await request.formData());
+    let { btcpayUrl, btcpayStoreId } = formData;
+    if (!btcpayUrl || !btcpayStoreId) {
+      return json({ success: false, message: `Please input your BTCPay server domain url and store Id` }, { status: 400 });
+    }
+    btcpayUrl = btcpayUrl.endsWith('/') ? btcpayUrl.slice(0, -1) : btcpayUrl;
+    const isValidBTCPayStore = await validateBTCPayStoreInstance(btcpayUrl, btcpayStoreId, shopId);
+    if (!isValidBTCPayStore) {
+      return json({ success: false, message: 'Failed to validate BTCPay store. Kindly ensure you have the plugin installed on your BTCPay Server instance.' }, { status: 400 });
+    }
+    const shopInfo = await getShopInfo(shop);
+    var data = {
+      btcpayUrl,
+      shopName: shopInfo.name,
+      shop,
+      btcpayStoreId,
+      shopId, 
+      shopOwner: shopInfo.name, 
+      currency: shopInfo.currency, 
+      country: shopInfo.country
+    };
+    const user = await db.bTCPayServerStore.upsert({
+      where: { shop }, 
+      update: data,
+      create: data
+    });
+    return json({
+      btcpayUrl, success: true,
+      message: "BTCPay URL saved successfully.",
+    });
+  } catch (error) {
+    console.log('Error encountered', error.message) 
+    return json({ success: false, message: `Error: ${error.message}` }, { status: 500 });
+  }
+};
 
-  return {
-    product: responseJson.data.productCreate.product,
-    variant: variantResponseJson.data.productVariantsBulkUpdate.productVariants,
-  };
+const getShopInfo = async (shopDomain) => {
+  let session = await findSessionByShop(shopDomain);
+  const response = await fetch(`https://${shopDomain}/admin/api/2023-04/shop.json`, {
+    method: 'GET',
+    headers: {
+      'X-Shopify-Access-Token': session.accessToken,
+      'Content-Type': 'application/json',
+    },
+  });
+  const data = await response.json(); 
+  return data.shop;
+};
+
+const validateBTCPayStoreInstance = async (btcpayUrl, storeId, shopName) => {
+  try {
+    const response = await fetch(`${btcpayUrl}/stores/${storeId}/plugins/shopify/validate/${shopName}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+};
+
+const findSessionByShop = async (shop) => {
+  return await db.session.findFirst({ where: { shop } });
 };
 
 export default function Index() {
   const fetcher = useFetcher();
   const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
-  const productId = fetcher.data?.product?.id.replace(
-    "gid://shopify/Product/",
-    "",
-  );
+  const settings = useLoaderData();
+  const [formState, setFormState] = useState(settings);
+  const [errorMessage, setErrorMessage] = useState(null);
 
-  useEffect(() => {
-    if (productId) {
-      shopify.toast.show("Product created");
+  useEffect(() => { 
+    if (fetcher.data?.success === false) {
+      shopify.toast.show(fetcher.data.message || "Error saving BTCPay URL");
+      setErrorMessage(fetcher.data.message);
+    } else if (fetcher.data?.success === true) {
+      setErrorMessage(null);
+      shopify.toast.show("BTCPay URL saved successfully");
     }
-  }, [productId, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+  }, [fetcher.data, shopify]);
 
-  return (
+  return ( 
     <Page>
-      <TitleBar title="Remix app template">
-        <button variant="primary" onClick={generateProduct}>
-          Generate a product
-        </button>
-      </TitleBar>
-      <BlockStack gap="500">
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="500">
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingMd">
-                    Congrats on creating a new Shopify app 🎉
-                  </Text>
-                  <Text variant="bodyMd" as="p">
-                    This embedded app template uses{" "}
-                    <Link
-                      url="https://shopify.dev/docs/apps/tools/app-bridge"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      App Bridge
-                    </Link>{" "}
-                    interface examples like an{" "}
-                    <Link url="/app/additional" removeUnderline>
-                      additional page in the app nav
-                    </Link>
-                    , as well as an{" "}
-                    <Link
-                      url="https://shopify.dev/docs/api/admin-graphql"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      Admin GraphQL
-                    </Link>{" "}
-                    mutation demo, to provide a starting point for app
-                    development.
-                  </Text>
-                </BlockStack>
-                <BlockStack gap="200">
-                  <Text as="h3" variant="headingMd">
-                    Get started with products
-                  </Text>
-                  <Text as="p" variant="bodyMd">
-                    Generate a product with GraphQL and get the JSON output for
-                    that product. Learn more about the{" "}
-                    <Link
-                      url="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      productCreate
-                    </Link>{" "}
-                    mutation in our API references.
-                  </Text>
-                </BlockStack>
-                <InlineStack gap="300">
-                  <Button loading={isLoading} onClick={generateProduct}>
-                    Generate a product
-                  </Button>
-                  {fetcher.data?.product && (
-                    <Button
-                      url={`shopify:admin/products/${productId}`}
-                      target="_blank"
-                      variant="plain"
-                    >
-                      View product
-                    </Button>
-                  )}
-                </InlineStack>
-                {fetcher.data?.product && (
-                  <>
-                    <Text as="h3" variant="headingMd">
-                      {" "}
-                      productCreate mutation
-                    </Text>
-                    <Box
-                      padding="400"
-                      background="bg-surface-active"
-                      borderWidth="025"
-                      borderRadius="200"
-                      borderColor="border"
-                      overflowX="scroll"
-                    >
-                      <pre style={{ margin: 0 }}>
-                        <code>
-                          {JSON.stringify(fetcher.data.product, null, 2)}
-                        </code>
-                      </pre>
-                    </Box>
-                    <Text as="h3" variant="headingMd">
-                      {" "}
-                      productVariantsBulkUpdate mutation
-                    </Text>
-                    <Box
-                      padding="400"
-                      background="bg-surface-active"
-                      borderWidth="025"
-                      borderRadius="200"
-                      borderColor="border"
-                      overflowX="scroll"
-                    >
-                      <pre style={{ margin: 0 }}>
-                        <code>
-                          {JSON.stringify(fetcher.data.variant, null, 2)}
-                        </code>
-                      </pre>
-                    </Box>
-                  </>
-                )}
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-          <Layout.Section variant="oneThird">
-            <BlockStack gap="500">
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingMd">
-                    App template specs
-                  </Text>
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        Framework
-                      </Text>
-                      <Link
-                        url="https://remix.run"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        Remix
-                      </Link>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        Database
-                      </Text>
-                      <Link
-                        url="https://www.prisma.io/"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        Prisma
-                      </Link>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        Interface
-                      </Text>
-                      <span>
-                        <Link
-                          url="https://polaris.shopify.com"
-                          target="_blank"
-                          removeUnderline
-                        >
-                          Polaris
-                        </Link>
-                        {", "}
-                        <Link
-                          url="https://shopify.dev/docs/apps/tools/app-bridge"
-                          target="_blank"
-                          removeUnderline
-                        >
-                          App Bridge
-                        </Link>
-                      </span>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        API
-                      </Text>
-                      <Link
-                        url="https://shopify.dev/docs/api/admin-graphql"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        GraphQL API
-                      </Link>
-                    </InlineStack>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingMd">
-                    Next steps
-                  </Text>
-                  <List>
-                    <List.Item>
-                      Build an{" "}
-                      <Link
-                        url="https://shopify.dev/docs/apps/getting-started/build-app-example"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        {" "}
-                        example app
-                      </Link>{" "}
-                      to get started
-                    </List.Item>
-                    <List.Item>
-                      Explore Shopify’s API with{" "}
-                      <Link
-                        url="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        GraphiQL
-                      </Link>
-                    </List.Item>
-                  </List>
-                </BlockStack>
-              </Card>
+      <TitleBar title="BTCPay Server - Shopify plugin" />
+      <BlockStack gap={{ xs: "800", sm: "400" }}>
+        <InlineGrid columns={{ xs: "1fr", md: "2fr 5fr" }} gap="400">
+          <Box
+            as="section"
+            paddingInlineStart={{ xs: 400, sm: 0 }}
+            paddingInlineEnd={{ xs: 400, sm: 0 }}
+          >
+            <BlockStack gap="400">
+              <Text as="h3" variant="headingMd">
+                BTCPay Server
+              </Text>
+              <Text as="p" variant="bodyMd">
+                Please enter your BTCPay server Url and the Store ID (where the plugin is installed)
+              </Text>
             </BlockStack>
-          </Layout.Section>
-        </Layout>
-      </BlockStack>
+          </Box>
+          <Card roundedAbove="sm">
+            <fetcher.Form method="POST">
+            <BlockStack gap="400">
+              <TextField
+                label="BTCPay URL"
+                name="btcpayUrl"
+                value={formState?.btcpayUrl}
+                onChange={(v) =>
+                  setFormState({ ...formState, btcpayUrl: v })
+                }
+              />
+              <TextField
+                label="BTCPay Store Id"
+                name="btcpayStoreId"
+                value={formState?.btcpayStoreId}
+                onChange={(v) =>
+                  setFormState({ ...formState, btcpayStoreId: v })
+                }
+              />
+              <Button
+              submit
+              primary
+              loading={fetcher.state === "submitting"}
+              disabled={fetcher.state === "submitting"}
+              >
+                Save
+              </Button>
+            </BlockStack>
+            </fetcher.Form>
+          </Card> 
+        </InlineGrid>
+      </BlockStack>  
     </Page>
   );
 }
