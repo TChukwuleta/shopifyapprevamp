@@ -59,13 +59,9 @@ function Extension() {
 
   const validateToken = async () => {
     try {
-      const storeData = await retrieveBTCPayUrl(shopName);
-      if (!storeData.btcpayUrl || !storeData.btcpayStoreId) {
-        setError('Failed to retrieve BTCPay URL or Store ID');
-      }
-      setBtcPayStoreId(storeData.btcpayStoreId);
-      setBtcPayUrl(storeData.btcpayUrl);
-      await setCheckTokenValidity(storeData.btcpayUrl, storeData.btcpayStoreId, shopName);
+      setBtcPayStoreId("9cDXw64KHiGxwWQ8NawPUmvKhQ8TSiDGs5J8HVDJuxpL");
+      setBtcPayUrl("https://258c-102-89-46-41.ngrok-free.app");
+      await setCheckTokenValidity("https://258c-102-89-46-41.ngrok-free.app", "9cDXw64KHiGxwWQ8NawPUmvKhQ8TSiDGs5J8HVDJuxpL", shopName);
     } catch (error) {
       setError(`Failed to validate token: ${error.message}`);
       setIsTokenValid(false);
